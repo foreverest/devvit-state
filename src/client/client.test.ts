@@ -4,7 +4,7 @@ import type {
   DevvitStateUpdate,
   DevvitStateUpdatesSinceResult,
   DevvitStateSnapshot,
-} from "../shared";
+} from "../shared/index.js";
 import { createDevvitStateClient } from "./index";
 
 type RealtimeOptions = {

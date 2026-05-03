@@ -13,9 +13,9 @@ import {
   type DevvitStateUpdatesSinceResult,
   type DevvitStatePatch,
   type DevvitStateSnapshot,
-} from "../shared";
+} from "../shared/index.js";
 
-export { getDevvitStateRealtimeChannel } from "../shared";
+export { getDevvitStateRealtimeChannel } from "../shared/index.js";
 
 /**
  * Redis sorted-set member shape accepted by Devvit Redis APIs.

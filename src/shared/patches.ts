@@ -2,7 +2,7 @@ import type {
   DevvitStateJsonObject,
   DevvitStateJsonValue,
   DevvitStatePatch,
-} from "./schemas";
+} from "./schemas.js";
 
 /**
  * Clones a JSON-compatible state value.

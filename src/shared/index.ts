@@ -1,9 +1,9 @@
-export { getDevvitStateRealtimeChannel } from "./channel";
+export { getDevvitStateRealtimeChannel } from "./channel.js";
 export {
   applyDevvitStatePatches,
   cloneDevvitStateJson,
   createDevvitStatePatches,
-} from "./patches";
+} from "./patches.js";
 export {
   createDevvitStateSnapshotSchema,
   createDevvitStateValueSchema,
@@ -17,4 +17,4 @@ export {
   type DevvitStateJsonValue,
   type DevvitStatePatch,
   type DevvitStateSnapshot,
-} from "./schemas";
+} from "./schemas.js";

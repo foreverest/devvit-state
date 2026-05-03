@@ -10,9 +10,9 @@ import {
   type DevvitStateUpdate,
   type DevvitStateUpdatesSinceResult,
   type DevvitStateSnapshot,
-} from "../shared";
+} from "../shared/index.js";
 
-export { getDevvitStateRealtimeChannel } from "../shared";
+export { getDevvitStateRealtimeChannel } from "../shared/index.js";
 
 /**
  * Options for creating a client-side Devvit state subscriber.
