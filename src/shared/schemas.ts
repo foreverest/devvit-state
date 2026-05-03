@@ -77,7 +77,7 @@ export type DevvitStateUpdatesSinceResult = z.infer<
 /**
  * A versioned point-in-time state value.
  */
-export type DevvitStateSnapshot<State extends DevvitStateJsonValue> = {
+export type DevvitStateSnapshot<State = DevvitStateJsonValue> = {
   /** Monotonically increasing state version. */
   version: number;
   /** Zod-validated state value at this version. */
@@ -89,14 +89,26 @@ export type DevvitStateSnapshot<State extends DevvitStateJsonValue> = {
 /**
  * Creates a runtime snapshot schema for a caller-provided state schema.
  */
-export const createDevvitStateSnapshotSchema = <
-  State extends DevvitStateJsonValue,
->(
+export const createDevvitStateSnapshotSchema = <State>(
   stateSchema: ZodType<State>,
 ): ZodType<DevvitStateSnapshot<State>> => {
   return z.object({
     version: z.number().int().nonnegative(),
-    state: stateSchema,
+    state: createDevvitStateValueSchema(stateSchema),
     updatedAtMs: z.number().finite(),
   });
+};
+
+/**
+ * Wraps a caller-provided schema with JSON compatibility validation.
+ */
+export const createDevvitStateValueSchema = <State>(
+  stateSchema: ZodType<State>,
+): ZodType<State> => {
+  return stateSchema.refine(
+    (value) => devvitStateJsonValueSchema.safeParse(value).success,
+    {
+      message: "State must be JSON-compatible.",
+    },
+  );
 };

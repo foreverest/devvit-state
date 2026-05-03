@@ -3,11 +3,12 @@ import type { ZodType } from "zod";
 import {
   applyDevvitStatePatches,
   createDevvitStateSnapshotSchema,
+  createDevvitStateValueSchema,
+  devvitStateJsonValueSchema,
   devvitStateUpdateSchema,
   devvitStateUpdatesSinceResultSchema,
   type DevvitStateUpdate,
   type DevvitStateUpdatesSinceResult,
-  type DevvitStateJsonValue,
   type DevvitStateSnapshot,
 } from "../shared";
 
@@ -16,23 +17,22 @@ export { getDevvitStateRealtimeChannel } from "../shared";
 /**
  * Options for creating a client-side Devvit state subscriber.
  */
-export type CreateDevvitStateClientOptions<State extends DevvitStateJsonValue> =
-  {
-    /** Unique application-level key matching the server state key. */
-    key: string;
-    /** Zod schema used to validate snapshots and applied updates. */
-    schema: ZodType<State>;
-    /** Realtime channel where server updates are broadcast. */
-    channel: string;
-    /** Fetches the baseline snapshot through app-owned transport. */
-    fetchSnapshot: () => Promise<DevvitStateSnapshot<State>>;
-    /** Fetches committed updates after a known version through app-owned transport. */
-    fetchUpdatesSince: (
-      input: DevvitStateClientUpdatesSinceInput,
-    ) => Promise<DevvitStateUpdatesSinceResult>;
-    /** Maximum number of updates requested in one replay call. */
-    maxUpdateFetchLimit?: number;
-  };
+export type CreateDevvitStateClientOptions<State> = {
+  /** Unique application-level key matching the server state key. */
+  key: string;
+  /** Zod schema used to validate snapshots and applied updates. */
+  schema: ZodType<State>;
+  /** Realtime channel where server updates are broadcast. */
+  channel: string;
+  /** Fetches the baseline snapshot through app-owned transport. */
+  fetchSnapshot: () => Promise<DevvitStateSnapshot<State>>;
+  /** Fetches committed updates after a known version through app-owned transport. */
+  fetchUpdatesSince: (
+    input: DevvitStateClientUpdatesSinceInput,
+  ) => Promise<DevvitStateUpdatesSinceResult>;
+  /** Maximum number of updates requested in one replay call. */
+  maxUpdateFetchLimit?: number;
+};
 
 /**
  * Input passed to `fetchUpdatesSince`.
@@ -47,7 +47,7 @@ export type DevvitStateClientUpdatesSinceInput = {
 /**
  * Payload delivered when the client has loaded its baseline snapshot.
  */
-export type DevvitStateClientReadyInput<State extends DevvitStateJsonValue> = {
+export type DevvitStateClientReadyInput<State> = {
   /** Baseline snapshot used before incremental updates are delivered. */
   snapshot: DevvitStateSnapshot<State>;
 };
@@ -55,7 +55,7 @@ export type DevvitStateClientReadyInput<State extends DevvitStateJsonValue> = {
 /**
  * Payload delivered for each committed update applied by the client.
  */
-export type DevvitStateClientUpdateInput<State extends DevvitStateJsonValue> = {
+export type DevvitStateClientUpdateInput<State> = {
   /** Committed update that advanced the local state by one version. */
   update: DevvitStateUpdate;
   /** State after applying the update. */
@@ -67,7 +67,7 @@ export type DevvitStateClientUpdateInput<State extends DevvitStateJsonValue> = {
 /**
  * Payload delivered when the client cannot replay missing updates and reloads a snapshot.
  */
-export type DevvitStateClientResyncInput<State extends DevvitStateJsonValue> = {
+export type DevvitStateClientResyncInput<State> = {
   /** Fresh snapshot that replaced the client's local state. */
   snapshot: DevvitStateSnapshot<State>;
 };
@@ -75,9 +75,7 @@ export type DevvitStateClientResyncInput<State extends DevvitStateJsonValue> = {
 /**
  * Callback set for a Devvit state subscription.
  */
-export type DevvitStateClientSubscribeOptions<
-  State extends DevvitStateJsonValue,
-> = {
+export type DevvitStateClientSubscribeOptions<State> = {
   /** Called once after the baseline snapshot is loaded. */
   onReady?: (input: DevvitStateClientReadyInput<State>) => void;
   /** Called for each contiguous update applied to local state. */
@@ -99,7 +97,7 @@ export type DevvitStateSubscription = {
 /**
  * Client-side API for subscribing to one keyed Devvit state object.
  */
-export type DevvitStateClient<State extends DevvitStateJsonValue> = {
+export type DevvitStateClient<State> = {
   /** Starts Realtime, loads a baseline snapshot, replays gaps, and delivers updates. */
   subscribe(
     callbacks?: DevvitStateClientSubscribeOptions<State>,
@@ -111,7 +109,7 @@ const defaultMaxUpdateFetchLimit = 500;
 /**
  * Creates a client-side subscriber for Zod-typed Devvit state.
  */
-export const createDevvitStateClient = <State extends DevvitStateJsonValue>({
+export const createDevvitStateClient = <State>({
   key,
   schema,
   channel,
@@ -123,6 +121,7 @@ export const createDevvitStateClient = <State extends DevvitStateJsonValue>({
     throw new Error("maxUpdateFetchLimit must be a positive safe integer.");
   }
 
+  const stateSchema = createDevvitStateValueSchema(schema);
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
 
   const subscribe = async (
@@ -288,8 +287,11 @@ export const createDevvitStateClient = <State extends DevvitStateJsonValue>({
       }
 
       const previousState = snapshot.state;
-      const nextState = schema.parse(
-        applyDevvitStatePatches(previousState, update.patches),
+      const nextState = stateSchema.parse(
+        applyDevvitStatePatches(
+          devvitStateJsonValueSchema.parse(previousState),
+          update.patches,
+        ),
       );
       const nextSnapshot: DevvitStateSnapshot<State> = {
         version: update.version,

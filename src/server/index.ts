@@ -5,20 +5,56 @@ import {
   cloneDevvitStateJson,
   createDevvitStatePatches,
   createDevvitStateSnapshotSchema,
+  createDevvitStateValueSchema,
+  devvitStateJsonValueSchema,
   devvitStateUpdateSchema,
   getDevvitStateRealtimeChannel,
   type DevvitStateUpdate,
   type DevvitStateUpdatesSinceResult,
-  type DevvitStateJsonValue,
   type DevvitStatePatch,
   type DevvitStateSnapshot,
 } from "../shared";
 
 export { getDevvitStateRealtimeChannel } from "../shared";
 
-type RedisSortedSetMember = {
+/**
+ * Redis sorted-set member shape accepted by Devvit Redis APIs.
+ */
+export type DevvitStateRedisSortedSetMember = {
   member: string;
   score: number;
+};
+
+/**
+ * Redis transaction exposed to app-specific side writes.
+ *
+ * Methods called here are committed in the same Redis transaction as the state
+ * snapshot, version, and update-log writes.
+ */
+export type DevvitStateTransaction = {
+  set(
+    key: string,
+    value: string,
+    options?: { expiration?: Date },
+  ): Promise<unknown>;
+  del(...keys: string[]): Promise<unknown>;
+  incrBy(key: string, value: number): Promise<unknown>;
+  zAdd(
+    key: string,
+    ...members: DevvitStateRedisSortedSetMember[]
+  ): Promise<unknown>;
+  zRem(key: string, members: string[]): Promise<unknown>;
+  zRemRangeByRank(key: string, start: number, stop: number): Promise<unknown>;
+};
+
+/**
+ * Options for app-specific writes that must commit with a state operation.
+ */
+export type DevvitStateWriteTransactionOptions = {
+  /** Additional Redis writes to enqueue in the same state transaction. */
+  writeTransaction?: (
+    transaction: DevvitStateTransaction,
+  ) => Promise<void> | void;
 };
 
 type DevvitStateRedis = {
@@ -37,17 +73,13 @@ type DevvitStateRedis = {
         count: number;
       };
     },
-  ): Promise<RedisSortedSetMember[]>;
+  ): Promise<DevvitStateRedisSortedSetMember[]>;
 };
 
-type DevvitStateTransactionRedis = {
+type DevvitStateTransactionRedis = DevvitStateTransaction & {
   multi(): Promise<void>;
   exec(): Promise<unknown[]>;
   discard(): Promise<void>;
-  set(key: string, value: string): Promise<unknown>;
-  incrBy(key: string, value: number): Promise<unknown>;
-  zAdd(key: string, ...members: RedisSortedSetMember[]): Promise<unknown>;
-  zRemRangeByRank(key: string, start: number, stop: number): Promise<unknown>;
 };
 
 type DevvitStateRealtime = {
@@ -63,7 +95,7 @@ type DevvitStateStorageKeys = {
 /**
  * Options for creating a server-side Devvit state manager.
  */
-export type CreateDevvitStateOptions<State extends DevvitStateJsonValue> = {
+export type CreateDevvitStateOptions<State> = {
   /** Unique application-level key for this state instance. */
   key: string;
   /** Zod schema used to validate snapshots, mutations, and patch results. */
@@ -100,20 +132,20 @@ export type DevvitStateUpdatesSinceInput = {
  * The producer may run more than once after Redis transaction conflicts. Keep it
  * deterministic and free of external side effects.
  */
-export type DevvitStateMutationProducer<State extends DevvitStateJsonValue> = (
-  draft: State,
-) => void;
+export type DevvitStateMutationProducer<State> = (draft: State) => void;
 
 /**
  * Server-side API for one keyed Devvit state object.
  */
-export type DevvitState<State extends DevvitStateJsonValue> = {
+export type DevvitState<State> = {
   /** Unique application-level key for this state instance. */
   readonly key: string;
   /** Realtime channel where committed updates are broadcast. */
   readonly channel: string;
   /** Creates version 0 if no snapshot exists, otherwise returns the existing snapshot. */
-  initialize(): Promise<DevvitStateSnapshot<State>>;
+  initialize(
+    options?: DevvitStateWriteTransactionOptions,
+  ): Promise<DevvitStateSnapshot<State>>;
   /** Reads the current authoritative snapshot, or `null` if uninitialized. */
   getCurrent(): Promise<DevvitStateSnapshot<State> | null>;
   /** Reads bounded recent updates after `sinceVersion` for client replay. */
@@ -123,10 +155,12 @@ export type DevvitState<State extends DevvitStateJsonValue> = {
   /** Atomically mutates state with an ergonomic producer callback. */
   mutate(
     producer: DevvitStateMutationProducer<State>,
+    options?: DevvitStateWriteTransactionOptions,
   ): Promise<DevvitStateUpdate | null>;
   /** Atomically applies explicit JSON Patch-style operations. */
   patch(
     patches: readonly DevvitStatePatch[],
+    options?: DevvitStateWriteTransactionOptions,
   ): Promise<DevvitStateUpdate | null>;
 };
 
@@ -137,7 +171,7 @@ const maxCommitAttempts = 5;
 /**
  * Creates a server-side manager for Zod-typed atomic Devvit state.
  */
-export const createDevvitState = <State extends DevvitStateJsonValue>({
+export const createDevvitState = <State>({
   key,
   schema,
   defaultValue,
@@ -157,9 +191,14 @@ export const createDevvitState = <State extends DevvitStateJsonValue>({
   }
 
   const storageKeys = getDevvitStateStorageKeys(key);
+  const stateSchema = createDevvitStateValueSchema(schema);
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
 
-  const initialize = async (): Promise<DevvitStateSnapshot<State>> => {
+  const initialize = async ({
+    writeTransaction,
+  }: DevvitStateWriteTransactionOptions = {}): Promise<
+    DevvitStateSnapshot<State>
+  > => {
     for (let attempt = 0; attempt < maxCommitAttempts; attempt += 1) {
       // Watch the snapshot key so two first-time initializers do not both create
       // different version-zero records.
@@ -179,16 +218,19 @@ export const createDevvitState = <State extends DevvitStateJsonValue>({
           return existingSnapshot;
         }
 
-        const defaultState = schema.parse(defaultValue ? defaultValue() : {});
+        const defaultState = stateSchema.parse(
+          defaultValue ? defaultValue() : {},
+        );
         const snapshot: DevvitStateSnapshot<State> = {
           version: 0,
-          state: cloneDevvitStateJson(defaultState),
+          state: structuredClone(defaultState),
           updatedAtMs: now(),
         };
 
         await transaction.multi();
         await transaction.set(storageKeys.version, "0");
         await transaction.set(storageKeys.snapshot, JSON.stringify(snapshot));
+        await writeTransaction?.(transaction);
 
         const results = await transaction.exec();
         shouldDiscard = false;
@@ -259,6 +301,7 @@ export const createDevvitState = <State extends DevvitStateJsonValue>({
 
   const mutate = async (
     producer: DevvitStateMutationProducer<State>,
+    options: DevvitStateWriteTransactionOptions = {},
   ): Promise<DevvitStateUpdate | null> => {
     return commitMutation({
       key,
@@ -266,24 +309,29 @@ export const createDevvitState = <State extends DevvitStateJsonValue>({
       redis,
       realtime: realtimeClient,
       storageKeys,
-      schema,
+      stateSchema,
       snapshotSchema,
       maxUpdates,
       now,
+      writeTransaction: options.writeTransaction,
       getPatches: (snapshot) => {
-        const nextState = cloneDevvitStateJson(snapshot.state);
+        const nextState = structuredClone(snapshot.state);
 
         producer(nextState);
 
-        const validatedNextState = schema.parse(nextState);
+        const validatedNextState = stateSchema.parse(nextState);
 
-        return createDevvitStatePatches(snapshot.state, validatedNextState);
+        return createDevvitStatePatches(
+          devvitStateJsonValueSchema.parse(snapshot.state),
+          devvitStateJsonValueSchema.parse(validatedNextState),
+        );
       },
     });
   };
 
   const patch = async (
     patches: readonly DevvitStatePatch[],
+    options: DevvitStateWriteTransactionOptions = {},
   ): Promise<DevvitStateUpdate | null> => {
     return commitMutation({
       key,
@@ -291,16 +339,23 @@ export const createDevvitState = <State extends DevvitStateJsonValue>({
       redis,
       realtime: realtimeClient,
       storageKeys,
-      schema,
+      stateSchema,
       snapshotSchema,
       maxUpdates,
       now,
+      writeTransaction: options.writeTransaction,
       getPatches: (snapshot) => {
-        const nextState = schema.parse(
-          applyDevvitStatePatches(snapshot.state, patches),
+        const nextState = stateSchema.parse(
+          applyDevvitStatePatches(
+            devvitStateJsonValueSchema.parse(snapshot.state),
+            patches,
+          ),
         );
 
-        return createDevvitStatePatches(snapshot.state, nextState);
+        return createDevvitStatePatches(
+          devvitStateJsonValueSchema.parse(snapshot.state),
+          devvitStateJsonValueSchema.parse(nextState),
+        );
       },
     });
   };
@@ -316,16 +371,17 @@ export const createDevvitState = <State extends DevvitStateJsonValue>({
   };
 };
 
-const commitMutation = async <State extends DevvitStateJsonValue>({
+const commitMutation = async <State>({
   key,
   channel,
   redis,
   realtime,
   storageKeys,
-  schema,
+  stateSchema,
   snapshotSchema,
   maxUpdates,
   now,
+  writeTransaction,
   getPatches,
 }: {
   key: string;
@@ -333,10 +389,13 @@ const commitMutation = async <State extends DevvitStateJsonValue>({
   redis: DevvitStateRedis;
   realtime: DevvitStateRealtime;
   storageKeys: DevvitStateStorageKeys;
-  schema: ZodType<State>;
+  stateSchema: ZodType<State>;
   snapshotSchema: ZodType<DevvitStateSnapshot<State>>;
   maxUpdates: number;
   now: () => number;
+  writeTransaction?: (
+    transaction: DevvitStateTransaction,
+  ) => Promise<void> | void;
   getPatches: (
     snapshot: DevvitStateSnapshot<State>,
   ) => readonly DevvitStatePatch[];
@@ -370,13 +429,38 @@ const commitMutation = async <State extends DevvitStateJsonValue>({
       const patches = getPatches(snapshot).map(cloneDevvitStatePatch);
 
       if (patches.length === 0) {
+        if (writeTransaction) {
+          const countingTransaction = createCountingTransaction(transaction);
+
+          await transaction.multi();
+          await writeTransaction(countingTransaction);
+
+          if (countingTransaction.operationCount === 0) {
+            await discardTransaction(transaction);
+            shouldDiscard = false;
+            return null;
+          }
+
+          const results = await transaction.exec();
+          shouldDiscard = false;
+
+          if (results.length > 0) {
+            return null;
+          }
+
+          continue;
+        }
+
         await discardTransaction(transaction);
         shouldDiscard = false;
         return null;
       }
 
-      const nextState = schema.parse(
-        applyDevvitStatePatches(snapshot.state, patches),
+      const nextState = stateSchema.parse(
+        applyDevvitStatePatches(
+          devvitStateJsonValueSchema.parse(snapshot.state),
+          patches,
+        ),
       );
       const nextVersion = currentVersion + 1;
       const updatedAtMs = now();
@@ -405,6 +489,7 @@ const commitMutation = async <State extends DevvitStateJsonValue>({
         0,
         -(maxUpdates + 1),
       );
+      await writeTransaction?.(transaction);
 
       const results = await transaction.exec();
       shouldDiscard = false;
@@ -425,6 +510,45 @@ const commitMutation = async <State extends DevvitStateJsonValue>({
   }
 
   throw new Error(`Failed to commit state ${key}.`);
+};
+
+const createCountingTransaction = (
+  transaction: DevvitStateTransaction,
+): DevvitStateTransaction & { readonly operationCount: number } => {
+  let operationCount = 0;
+  const count = (): void => {
+    operationCount += 1;
+  };
+
+  return {
+    get operationCount() {
+      return operationCount;
+    },
+    async set(...args) {
+      count();
+      return transaction.set(...args);
+    },
+    async del(...args) {
+      count();
+      return transaction.del(...args);
+    },
+    async incrBy(...args) {
+      count();
+      return transaction.incrBy(...args);
+    },
+    async zAdd(...args) {
+      count();
+      return transaction.zAdd(...args);
+    },
+    async zRem(...args) {
+      count();
+      return transaction.zRem(...args);
+    },
+    async zRemRangeByRank(...args) {
+      count();
+      return transaction.zRemRangeByRank(...args);
+    },
+  };
 };
 
 const cloneDevvitStatePatch = (patch: DevvitStatePatch): DevvitStatePatch => {
@@ -454,7 +578,7 @@ const broadcastUpdate = async (
   }
 };
 
-const readStoredSnapshot = async <State extends DevvitStateJsonValue>({
+const readStoredSnapshot = async <State>({
   redis,
   snapshotKey,
   snapshotSchema,

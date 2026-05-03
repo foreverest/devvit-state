@@ -60,6 +60,27 @@ describe("Devvit state server", () => {
   );
 
   devvitTest(
+    "runs initialization side writes only for missing state",
+    async () => {
+      const state = createState("server:init-side-write");
+      const sideKey = "server:init-side-write:side";
+
+      await state.initialize({
+        writeTransaction: async (transaction) => {
+          await transaction.set(sideKey, "created");
+        },
+      });
+      await state.initialize({
+        writeTransaction: async (transaction) => {
+          await transaction.set(sideKey, "overwritten");
+        },
+      });
+
+      await expect(redis.get(sideKey)).resolves.toBe("created");
+    },
+  );
+
+  devvitTest(
     "rejects invalid default values and invalid next states",
     async () => {
       const invalidDefaultState = createDevvitState({
@@ -127,6 +148,68 @@ describe("Devvit state server", () => {
     },
   );
 
+  devvitTest(
+    "commits mutation side writes in the state transaction",
+    async () => {
+      const state = createState("server:side-write");
+      const sideKey = "server:side-write:side";
+
+      await state.initialize();
+
+      await state.mutate(
+        (draft) => {
+          draft.numbers.push(42);
+        },
+        {
+          writeTransaction: async (transaction) => {
+            await transaction.set(sideKey, "committed");
+          },
+        },
+      );
+
+      await expect(redis.get(sideKey)).resolves.toBe("committed");
+      await expect(state.getCurrent()).resolves.toMatchObject({
+        version: 1,
+        state: {
+          numbers: [1, 2, 3, 42],
+        },
+      });
+    },
+  );
+
+  devvitTest(
+    "commits no-op mutation side writes without creating an update",
+    async ({ mocks }) => {
+      const state = createState("server:no-op-side-write");
+      const sideKey = "server:no-op-side-write:side";
+
+      await state.initialize();
+
+      const update = await state.mutate(() => {}, {
+        writeTransaction: async (transaction) => {
+          await transaction.set(sideKey, "committed");
+        },
+      });
+
+      expect(update).toBeNull();
+      await expect(redis.get(sideKey)).resolves.toBe("committed");
+      await expect(state.getCurrent()).resolves.toMatchObject({
+        version: 0,
+      });
+      await expect(
+        state.getUpdatesSince({
+          sinceVersion: 0,
+        }),
+      ).resolves.toMatchObject({
+        currentVersion: 0,
+        updates: [],
+      });
+      expect(mocks.realtime.getSentMessagesForChannel(state.channel)).toEqual(
+        [],
+      );
+    },
+  );
+
   devvitTest("commits low-level patches after schema validation", async () => {
     const state = createState("server:patch");
 
@@ -190,6 +273,50 @@ describe("Devvit state server", () => {
       });
     },
   );
+
+  devvitTest("retries side writes after aborted transactions", async () => {
+    const state = createState("server:retry-side-write");
+    const sideKey = "server:retry-side-write:side";
+    const originalWatch = redis.watch.bind(redis);
+    let execCount = 0;
+    let sideWriteCount = 0;
+
+    await state.initialize();
+
+    vi.spyOn(redis, "watch").mockImplementation(async (...keys) => {
+      const transaction = await originalWatch(...keys);
+      const originalExec = transaction.exec.bind(transaction);
+
+      vi.spyOn(transaction, "exec").mockImplementation(async () => {
+        execCount += 1;
+
+        if (execCount === 1) {
+          await transaction.discard();
+          return [];
+        }
+
+        return await originalExec();
+      });
+
+      return transaction;
+    });
+
+    await state.mutate(
+      (draft) => {
+        draft.numbers.push(42);
+      },
+      {
+        writeTransaction: async (transaction) => {
+          sideWriteCount += 1;
+          await transaction.set(sideKey, String(sideWriteCount));
+        },
+      },
+    );
+
+    expect(execCount).toBe(2);
+    expect(sideWriteCount).toBe(2);
+    await expect(redis.get(sideKey)).resolves.toBe("2");
+  });
 
   devvitTest("reads bounded updates in sorted order with hasMore", async () => {
     const state = createState("server:updates");

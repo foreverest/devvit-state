@@ -6,6 +6,7 @@ export {
 } from "./patches";
 export {
   createDevvitStateSnapshotSchema,
+  createDevvitStateValueSchema,
   devvitStateUpdateSchema,
   devvitStateUpdatesSinceResultSchema,
   devvitStateJsonValueSchema,
