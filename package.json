@@ -1,6 +1,6 @@
 {
   "name": "devvit-state",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Atomic, versioned state sync for Devvit apps.",
   "license": "BSD-3-Clause",
   "type": "module",
