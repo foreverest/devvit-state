@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "customConditions": ["browser"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strictPropertyInitialization": false
+  },
+  "include": ["src/client/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "dist", "node_modules"]
+}

@@ -1,0 +1,83 @@
+{
+  "name": "devvit-state",
+  "version": "0.0.0",
+  "description": "Atomic, versioned state sync for Devvit apps.",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "homepage": "https://github.com/foreverest/devvit-state#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foreverest/devvit-state.git"
+  },
+  "bugs": {
+    "url": "https://github.com/foreverest/devvit-state/issues"
+  },
+  "keywords": [
+    "devvit",
+    "reddit",
+    "state",
+    "atomic",
+    "realtime",
+    "redis",
+    "sync",
+    "zod"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "exports": {
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./shared": {
+      "types": "./dist/shared/index.d.ts",
+      "import": "./dist/shared/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/shared/index.d.ts",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.shared.json && tsc -p tsconfig.build.server.json && tsc -p tsconfig.build.client.json",
+    "ci": "npm run type-check && npm run lint && npm run test && npm run build && npm run test:consumer && npm run pack:dry-run",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
+    "prepublishOnly": "npm run ci",
+    "prettier": "prettier --write .",
+    "test": "vitest run --config vitest.config.ts",
+    "test:consumer": "npm run build && tsc -p test/consumer/tsconfig.json",
+    "type-check": "tsc -p tsconfig.shared.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "peerDependencies": {
+    "@devvit/web": ">=0.12.0-0 <0.13.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@devvit/test": "0.12.22-next-2026-04-29-22-14-53-959af9a1c.0",
+    "@devvit/web": "0.12.22-next-2026-04-29-22-14-53-959af9a1c.0",
+    "@eslint/js": "9.39.2",
+    "@types/node": "^22.19.7",
+    "eslint": "9.39.2",
+    "globals": "17.2.0",
+    "prettier": "3.8.1",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.54.0",
+    "vitest": "^4.1.5",
+    "zod": "^4.3.6"
+  },
+  "engines": {
+    "node": ">=22.2.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

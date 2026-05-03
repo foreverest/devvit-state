@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "customConditions": ["browser"],
+    "noEmit": true,
+    "strictPropertyInitialization": false
+  },
+  "include": ["src/client/**/*", "src/shared/**/*"],
+  "exclude": ["dist", "node_modules"]
+}
