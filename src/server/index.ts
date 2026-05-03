@@ -17,50 +17,15 @@ import {
 
 export { getDevvitStateRealtimeChannel } from "../shared/index.js";
 
-/**
- * Redis sorted-set member shape accepted by Devvit Redis APIs.
- */
-export type DevvitStateRedisSortedSetMember = {
+type RedisSortedSetMember = {
   member: string;
   score: number;
-};
-
-/**
- * Redis transaction exposed to app-specific side writes.
- *
- * Methods called here are committed in the same Redis transaction as the state
- * snapshot, version, and update-log writes.
- */
-export type DevvitStateTransaction = {
-  set(
-    key: string,
-    value: string,
-    options?: { expiration?: Date },
-  ): Promise<unknown>;
-  del(...keys: string[]): Promise<unknown>;
-  incrBy(key: string, value: number): Promise<unknown>;
-  zAdd(
-    key: string,
-    ...members: DevvitStateRedisSortedSetMember[]
-  ): Promise<unknown>;
-  zRem(key: string, members: string[]): Promise<unknown>;
-  zRemRangeByRank(key: string, start: number, stop: number): Promise<unknown>;
-};
-
-/**
- * Options for app-specific writes that must commit with a state operation.
- */
-export type DevvitStateWriteTransactionOptions = {
-  /** Additional Redis writes to enqueue in the same state transaction. */
-  writeTransaction?: (
-    transaction: DevvitStateTransaction,
-  ) => Promise<void> | void;
 };
 
 type DevvitStateRedis = {
   get(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<unknown>;
-  watch(...keys: string[]): Promise<DevvitStateTransactionRedis>;
+  watch(...keys: string[]): Promise<DevvitStateRedisTransaction>;
   incrBy(key: string, value: number): Promise<number>;
   zRange(
     key: string,
@@ -73,13 +38,17 @@ type DevvitStateRedis = {
         count: number;
       };
     },
-  ): Promise<DevvitStateRedisSortedSetMember[]>;
+  ): Promise<RedisSortedSetMember[]>;
 };
 
-type DevvitStateTransactionRedis = DevvitStateTransaction & {
+type DevvitStateRedisTransaction = {
   multi(): Promise<void>;
   exec(): Promise<unknown[]>;
   discard(): Promise<void>;
+  set(key: string, value: string): Promise<unknown>;
+  incrBy(key: string, value: number): Promise<unknown>;
+  zAdd(key: string, ...members: RedisSortedSetMember[]): Promise<unknown>;
+  zRemRangeByRank(key: string, start: number, stop: number): Promise<unknown>;
 };
 
 type DevvitStateRealtime = {
@@ -143,9 +112,7 @@ export type DevvitState<State> = {
   /** Realtime channel where committed updates are broadcast. */
   readonly channel: string;
   /** Creates version 0 if no snapshot exists, otherwise returns the existing snapshot. */
-  initialize(
-    options?: DevvitStateWriteTransactionOptions,
-  ): Promise<DevvitStateSnapshot<State>>;
+  initialize(): Promise<DevvitStateSnapshot<State>>;
   /** Reads the current authoritative snapshot, or `null` if uninitialized. */
   getCurrent(): Promise<DevvitStateSnapshot<State> | null>;
   /** Reads bounded recent updates after `sinceVersion` for client replay. */
@@ -155,12 +122,10 @@ export type DevvitState<State> = {
   /** Atomically mutates state with an ergonomic producer callback. */
   mutate(
     producer: DevvitStateMutationProducer<State>,
-    options?: DevvitStateWriteTransactionOptions,
   ): Promise<DevvitStateUpdate | null>;
   /** Atomically applies explicit JSON Patch-style operations. */
   patch(
     patches: readonly DevvitStatePatch[],
-    options?: DevvitStateWriteTransactionOptions,
   ): Promise<DevvitStateUpdate | null>;
 };
 
@@ -194,11 +159,7 @@ export const createDevvitState = <State>({
   const stateSchema = createDevvitStateValueSchema(schema);
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
 
-  const initialize = async ({
-    writeTransaction,
-  }: DevvitStateWriteTransactionOptions = {}): Promise<
-    DevvitStateSnapshot<State>
-  > => {
+  const initialize = async (): Promise<DevvitStateSnapshot<State>> => {
     for (let attempt = 0; attempt < maxCommitAttempts; attempt += 1) {
       // Watch the snapshot key so two first-time initializers do not both create
       // different version-zero records.
@@ -230,7 +191,6 @@ export const createDevvitState = <State>({
         await transaction.multi();
         await transaction.set(storageKeys.version, "0");
         await transaction.set(storageKeys.snapshot, JSON.stringify(snapshot));
-        await writeTransaction?.(transaction);
 
         const results = await transaction.exec();
         shouldDiscard = false;
@@ -301,7 +261,6 @@ export const createDevvitState = <State>({
 
   const mutate = async (
     producer: DevvitStateMutationProducer<State>,
-    options: DevvitStateWriteTransactionOptions = {},
   ): Promise<DevvitStateUpdate | null> => {
     return commitMutation({
       key,
@@ -313,7 +272,6 @@ export const createDevvitState = <State>({
       snapshotSchema,
       maxUpdates,
       now,
-      writeTransaction: options.writeTransaction,
       getPatches: (snapshot) => {
         const nextState = structuredClone(snapshot.state);
 
@@ -331,7 +289,6 @@ export const createDevvitState = <State>({
 
   const patch = async (
     patches: readonly DevvitStatePatch[],
-    options: DevvitStateWriteTransactionOptions = {},
   ): Promise<DevvitStateUpdate | null> => {
     return commitMutation({
       key,
@@ -343,7 +300,6 @@ export const createDevvitState = <State>({
       snapshotSchema,
       maxUpdates,
       now,
-      writeTransaction: options.writeTransaction,
       getPatches: (snapshot) => {
         const nextState = stateSchema.parse(
           applyDevvitStatePatches(
@@ -381,7 +337,6 @@ const commitMutation = async <State>({
   snapshotSchema,
   maxUpdates,
   now,
-  writeTransaction,
   getPatches,
 }: {
   key: string;
@@ -393,9 +348,6 @@ const commitMutation = async <State>({
   snapshotSchema: ZodType<DevvitStateSnapshot<State>>;
   maxUpdates: number;
   now: () => number;
-  writeTransaction?: (
-    transaction: DevvitStateTransaction,
-  ) => Promise<void> | void;
   getPatches: (
     snapshot: DevvitStateSnapshot<State>,
   ) => readonly DevvitStatePatch[];
@@ -429,28 +381,6 @@ const commitMutation = async <State>({
       const patches = getPatches(snapshot).map(cloneDevvitStatePatch);
 
       if (patches.length === 0) {
-        if (writeTransaction) {
-          const countingTransaction = createCountingTransaction(transaction);
-
-          await transaction.multi();
-          await writeTransaction(countingTransaction);
-
-          if (countingTransaction.operationCount === 0) {
-            await discardTransaction(transaction);
-            shouldDiscard = false;
-            return null;
-          }
-
-          const results = await transaction.exec();
-          shouldDiscard = false;
-
-          if (results.length > 0) {
-            return null;
-          }
-
-          continue;
-        }
-
         await discardTransaction(transaction);
         shouldDiscard = false;
         return null;
@@ -489,7 +419,6 @@ const commitMutation = async <State>({
         0,
         -(maxUpdates + 1),
       );
-      await writeTransaction?.(transaction);
 
       const results = await transaction.exec();
       shouldDiscard = false;
@@ -510,45 +439,6 @@ const commitMutation = async <State>({
   }
 
   throw new Error(`Failed to commit state ${key}.`);
-};
-
-const createCountingTransaction = (
-  transaction: DevvitStateTransaction,
-): DevvitStateTransaction & { readonly operationCount: number } => {
-  let operationCount = 0;
-  const count = (): void => {
-    operationCount += 1;
-  };
-
-  return {
-    get operationCount() {
-      return operationCount;
-    },
-    async set(...args) {
-      count();
-      return transaction.set(...args);
-    },
-    async del(...args) {
-      count();
-      return transaction.del(...args);
-    },
-    async incrBy(...args) {
-      count();
-      return transaction.incrBy(...args);
-    },
-    async zAdd(...args) {
-      count();
-      return transaction.zAdd(...args);
-    },
-    async zRem(...args) {
-      count();
-      return transaction.zRem(...args);
-    },
-    async zRemRangeByRank(...args) {
-      count();
-      return transaction.zRemRangeByRank(...args);
-    },
-  };
 };
 
 const cloneDevvitStatePatch = (patch: DevvitStatePatch): DevvitStatePatch => {
@@ -628,7 +518,7 @@ const parseJsonRecord = (record: string): unknown => {
 };
 
 const discardTransaction = async (
-  transaction: DevvitStateTransactionRedis,
+  transaction: DevvitStateRedisTransaction,
 ): Promise<void> => {
   try {
     await transaction.discard();

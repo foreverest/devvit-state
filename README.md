@@ -80,26 +80,6 @@ const missingUpdates = await roomState.getUpdatesSince({
 });
 ```
 
-State commits can include app-owned Redis side writes. These writes are queued
-inside the same Redis transaction as the state snapshot, version, and update
-log:
-
-```ts
-await roomState.mutate(
-  (draft) => {
-    draft.users.push(userId);
-  },
-  {
-    writeTransaction: async (transaction) => {
-      await transaction.set(`room:${postId}:last-user`, userId);
-    },
-  },
-);
-```
-
-If the producer makes no state change, `writeTransaction` still commits, but no
-new state version is created and no Realtime update is broadcast.
-
 For lower-level callers, `patch()` applies explicit JSON Pointer patches:
 
 ```ts
@@ -181,7 +161,6 @@ await state.initialize();
 await state.getCurrent();
 await state.getUpdatesSince({ sinceVersion, limit });
 await state.mutate((draft) => {});
-await state.mutate((draft) => {}, { writeTransaction });
 await state.patch([{ op: "replace", path: "/title", value: "New title" }]);
 ```
 
@@ -217,6 +196,5 @@ createDevvitStatePatches(previousState, nextState);
 - State values must be JSON-compatible and accepted by the provided Zod schema.
 - `initialize()` writes version `0` only when the state is missing.
 - `mutate()` and `patch()` return `null` when no state change is produced.
-- `writeTransaction` callbacks run inside Redis transactions and may run more than once after transaction conflicts; keep them deterministic and free of external side effects.
 - Realtime messages may be dropped, duplicated, delayed, or reordered; clients treat Realtime as a fast path and recover with `fetchUpdatesSince`.
 - If the bounded update log no longer contains the missing update, the client fetches a fresh snapshot and calls `onResync`.
