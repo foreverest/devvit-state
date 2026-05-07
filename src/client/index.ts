@@ -130,8 +130,11 @@ export const createDevvitStateClient = <State>({
     let currentSnapshot: DevvitStateSnapshot<State> | null = null;
     let knownCurrentVersion = 0;
     let isUnsubscribed = false;
-    let isDraining = false;
-    let shouldDrainAgain = false;
+    // The drain loop is single-flight: at most one `activeDrain` runs at a
+    // time, and overlapping `scheduleDrain()` calls just re-arm `drainQueued`
+    // so the in-flight loop iterates again before resolving.
+    let activeDrain: Promise<void> | null = null;
+    let drainQueued = false;
     // Tracks the highest version observed through either Realtime or replay.
     // Pending updates are only delivered once every preceding version is known.
     const pendingUpdatesByVersion = new Map<number, DevvitStateUpdate>();
@@ -150,16 +153,33 @@ export const createDevvitStateClient = <State>({
       pendingUpdatesByVersion.set(update.version, update);
 
       if (currentSnapshot) {
-        scheduleDrain();
+        void scheduleDrain();
       }
     };
 
-    const scheduleDrain = (): void => {
-      shouldDrainAgain = true;
+    const scheduleDrain = (): Promise<void> => {
+      drainQueued = true;
 
-      if (!isDraining) {
-        void drainQueuedUpdates();
+      if (activeDrain) {
+        return activeDrain;
       }
+
+      activeDrain = (async () => {
+        try {
+          while (drainQueued && !isUnsubscribed) {
+            drainQueued = false;
+            try {
+              await drainQueuedUpdatesOnce();
+            } catch (error) {
+              callbacks.onError?.(error);
+            }
+          }
+        } finally {
+          activeDrain = null;
+        }
+      })();
+
+      return activeDrain;
     };
 
     const loadSnapshot = async (
@@ -210,29 +230,6 @@ export const createDevvitStateClient = <State>({
 
       for (const update of response.updates) {
         enqueueUpdate(update);
-      }
-    };
-
-    const drainQueuedUpdates = async (): Promise<void> => {
-      if (isDraining || isUnsubscribed) {
-        return;
-      }
-
-      isDraining = true;
-
-      try {
-        while (shouldDrainAgain && !isUnsubscribed) {
-          shouldDrainAgain = false;
-          await drainQueuedUpdatesOnce();
-        }
-      } catch (error) {
-        callbacks.onError?.(error);
-      } finally {
-        isDraining = false;
-      }
-
-      if (shouldDrainAgain && !isUnsubscribed) {
-        scheduleDrain();
       }
     };
 
@@ -325,8 +322,7 @@ export const createDevvitStateClient = <State>({
     try {
       const readySnapshot = await loadSnapshot(false);
       await fetchAndQueueUpdatesSince(readySnapshot.version);
-      shouldDrainAgain = true;
-      await drainQueuedUpdates();
+      await scheduleDrain();
     } catch (error) {
       disconnectRealtime(channel);
       callbacks.onError?.(error);
