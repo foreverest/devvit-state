@@ -2,11 +2,11 @@ import { realtime, redis as defaultRedis } from "@devvit/web/server";
 import type { ZodType } from "zod";
 import {
   applyDevvitStatePatches,
+  asDevvitStateJsonValue,
   cloneDevvitStateJson,
   createDevvitStatePatches,
   createDevvitStateSnapshotSchema,
   createDevvitStateValueSchema,
-  devvitStateJsonValueSchema,
   devvitStateUpdateSchema,
   getDevvitStateRealtimeChannel,
   type DevvitStateUpdate,
@@ -265,8 +265,8 @@ export const createDevvitState = <State>({
 
         const nextState = stateSchema.parse(draft);
         const patches = createDevvitStatePatches(
-          devvitStateJsonValueSchema.parse(snapshot.state),
-          devvitStateJsonValueSchema.parse(nextState),
+          asDevvitStateJsonValue(snapshot.state),
+          asDevvitStateJsonValue(nextState),
         );
 
         return { patches, nextState };
@@ -287,15 +287,13 @@ export const createDevvitState = <State>({
       maxUpdates,
       now,
       produceMutation: (snapshot) => {
-        const previousJsonState = devvitStateJsonValueSchema.parse(
-          snapshot.state,
-        );
+        const previousJsonState = asDevvitStateJsonValue(snapshot.state);
         const nextState = stateSchema.parse(
           applyDevvitStatePatches(previousJsonState, patches),
         );
         const computedPatches = createDevvitStatePatches(
           previousJsonState,
-          devvitStateJsonValueSchema.parse(nextState),
+          asDevvitStateJsonValue(nextState),
         );
 
         return { patches: computedPatches, nextState };

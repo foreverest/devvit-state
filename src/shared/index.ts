@@ -5,6 +5,7 @@ export {
   createDevvitStatePatches,
 } from "./patches.js";
 export {
+  asDevvitStateJsonValue,
   createDevvitStateSnapshotSchema,
   createDevvitStateValueSchema,
   devvitStateUpdateSchema,

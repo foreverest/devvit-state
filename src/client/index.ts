@@ -2,9 +2,9 @@ import { connectRealtime, disconnectRealtime } from "@devvit/web/client";
 import type { ZodType } from "zod";
 import {
   applyDevvitStatePatches,
+  asDevvitStateJsonValue,
   createDevvitStateSnapshotSchema,
   createDevvitStateValueSchema,
-  devvitStateJsonValueSchema,
   devvitStateUpdateSchema,
   devvitStateUpdatesSinceResultSchema,
   type DevvitStateUpdate,
@@ -289,7 +289,7 @@ export const createDevvitStateClient = <State>({
       const previousState = snapshot.state;
       const nextState = stateSchema.parse(
         applyDevvitStatePatches(
-          devvitStateJsonValueSchema.parse(previousState),
+          asDevvitStateJsonValue(previousState),
           update.patches,
         ),
       );

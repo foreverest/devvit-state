@@ -101,6 +101,10 @@ export const createDevvitStateSnapshotSchema = <State>(
 
 /**
  * Wraps a caller-provided schema with JSON compatibility validation.
+ *
+ * Values produced by the wrapped schema are guaranteed JSON-compatible at
+ * runtime, which `asDevvitStateJsonValue` relies on to avoid re-validating
+ * the same value at later boundaries.
  */
 export const createDevvitStateValueSchema = <State>(
   stateSchema: ZodType<State>,
@@ -111,4 +115,18 @@ export const createDevvitStateValueSchema = <State>(
       message: "State must be JSON-compatible.",
     },
   );
+};
+
+/**
+ * Casts a state value validated by `createDevvitStateValueSchema` to its
+ * JSON-compatible counterpart for use with patch utilities.
+ *
+ * Safe because the `.refine` in `createDevvitStateValueSchema` enforces
+ * JSON compatibility at parse time, so re-walking the value with
+ * `devvitStateJsonValueSchema.parse` would only repeat work already done.
+ */
+export const asDevvitStateJsonValue = <Value>(
+  value: Value,
+): DevvitStateJsonValue => {
+  return value as unknown as DevvitStateJsonValue;
 };
