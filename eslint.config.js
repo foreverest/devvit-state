@@ -3,18 +3,36 @@ import globals from "globals";
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
+const layers = [
+  {
+    name: "server",
+    globals: globals.node,
+    project: "./tsconfig.server.json",
+  },
+  {
+    name: "client",
+    globals: globals.browser,
+    project: "./tsconfig.client.json",
+  },
+  {
+    name: "shared",
+    globals: globals.browser,
+    project: "./tsconfig.shared.json",
+  },
+];
+
 export default defineConfig([
   {
     ignores: ["dist/**", "node_modules/**", "coverage/**"],
   },
-  {
+  ...layers.map((layer) => ({
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["src/server/**/*.{ts,tsx}"],
+    files: [`src/${layer.name}/**/*.{ts,tsx}`],
     languageOptions: {
       ecmaVersion: 2023,
-      globals: globals.node,
+      globals: layer.globals,
       parserOptions: {
-        project: ["./tsconfig.server.json"],
+        project: [layer.project],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -23,39 +41,5 @@ export default defineConfig([
       "@typescript-eslint/no-unused-vars": ["off"],
       "no-unused-vars": ["off"],
     },
-  },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["src/client/**/*.{ts,tsx}"],
-    languageOptions: {
-      ecmaVersion: 2023,
-      globals: globals.browser,
-      parserOptions: {
-        project: ["./tsconfig.client.json"],
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: {
-      "@typescript-eslint/no-floating-promises": "error",
-      "@typescript-eslint/no-unused-vars": ["off"],
-      "no-unused-vars": ["off"],
-    },
-  },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["src/shared/**/*.{ts,tsx}"],
-    languageOptions: {
-      ecmaVersion: 2023,
-      globals: globals.browser,
-      parserOptions: {
-        project: ["./tsconfig.shared.json"],
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
-    rules: {
-      "@typescript-eslint/no-floating-promises": "error",
-      "@typescript-eslint/no-unused-vars": ["off"],
-      "no-unused-vars": ["off"],
-    },
-  },
+  })),
 ]);
