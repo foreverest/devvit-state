@@ -2,8 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "customConditions": ["browser"],
-    "noEmit": true,
-    "strictPropertyInitialization": false
+    "noEmit": true
   },
   "include": ["src/client/**/*", "src/shared/**/*"],
   "exclude": ["dist", "node_modules"]

@@ -1,7 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "exactOptionalPropertyTypes": false,
     "noEmit": true,
     "types": ["node"]
   },
