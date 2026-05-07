@@ -239,8 +239,8 @@ describe("Devvit state server", () => {
   });
 
   test("derives stable realtime channels from arbitrary keys", () => {
-    expect(getDevvitStateRealtimeChannel("my-state:t3_post")).toMatch(
-      /^devvit_state_[0-9a-f]+$/,
+    expect(getDevvitStateRealtimeChannel("my-state:t3_post")).toBe(
+      "devvit_state_my_2dstate_3at3_5fpost",
     );
     expect(getDevvitStateRealtimeChannel("a-b")).not.toBe(
       getDevvitStateRealtimeChannel("a_b"),
