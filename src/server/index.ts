@@ -160,13 +160,12 @@ export const createDevvitState = <State>({
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
 
   const initialize = async (): Promise<DevvitStateSnapshot<State>> => {
-    for (let attempt = 0; attempt < maxCommitAttempts; attempt += 1) {
-      // Watch the snapshot key so two first-time initializers do not both create
-      // different version-zero records.
-      const transaction = await redis.watch(storageKeys.snapshot);
-      let shouldDiscard = true;
-
-      try {
+    return commitWithRetry(
+      redis,
+      // Watch the snapshot key so two first-time initializers do not both
+      // create different version-zero records.
+      [storageKeys.snapshot],
+      async (transaction) => {
         const existingSnapshot = await readStoredSnapshot({
           redis,
           snapshotKey: storageKeys.snapshot,
@@ -174,8 +173,6 @@ export const createDevvitState = <State>({
         });
 
         if (existingSnapshot) {
-          await discardTransaction(transaction);
-          shouldDiscard = false;
           return existingSnapshot;
         }
 
@@ -193,21 +190,11 @@ export const createDevvitState = <State>({
         await transaction.set(storageKeys.snapshot, JSON.stringify(snapshot));
 
         const results = await transaction.exec();
-        shouldDiscard = false;
 
-        if (results.length > 0) {
-          return snapshot;
-        }
-      } catch (error) {
-        if (shouldDiscard) {
-          await discardTransaction(transaction);
-        }
-
-        throw error;
-      }
-    }
-
-    throw new Error(`Failed to initialize state ${key}.`);
+        return results.length > 0 ? snapshot : RETRY;
+      },
+      `Failed to initialize state ${key}.`,
+    );
   };
 
   const getCurrent = async (): Promise<DevvitStateSnapshot<State> | null> => {
@@ -268,21 +255,21 @@ export const createDevvitState = <State>({
       redis,
       realtime: realtimeClient,
       storageKeys,
-      stateSchema,
       snapshotSchema,
       maxUpdates,
       now,
-      getPatches: (snapshot) => {
-        const nextState = structuredClone(snapshot.state);
+      produceMutation: (snapshot) => {
+        const draft = structuredClone(snapshot.state);
 
-        producer(nextState);
+        producer(draft);
 
-        const validatedNextState = stateSchema.parse(nextState);
-
-        return createDevvitStatePatches(
+        const nextState = stateSchema.parse(draft);
+        const patches = createDevvitStatePatches(
           devvitStateJsonValueSchema.parse(snapshot.state),
-          devvitStateJsonValueSchema.parse(validatedNextState),
+          devvitStateJsonValueSchema.parse(nextState),
         );
+
+        return { patches, nextState };
       },
     });
   };
@@ -296,22 +283,22 @@ export const createDevvitState = <State>({
       redis,
       realtime: realtimeClient,
       storageKeys,
-      stateSchema,
       snapshotSchema,
       maxUpdates,
       now,
-      getPatches: (snapshot) => {
-        const nextState = stateSchema.parse(
-          applyDevvitStatePatches(
-            devvitStateJsonValueSchema.parse(snapshot.state),
-            patches,
-          ),
+      produceMutation: (snapshot) => {
+        const previousJsonState = devvitStateJsonValueSchema.parse(
+          snapshot.state,
         );
-
-        return createDevvitStatePatches(
-          devvitStateJsonValueSchema.parse(snapshot.state),
+        const nextState = stateSchema.parse(
+          applyDevvitStatePatches(previousJsonState, patches),
+        );
+        const computedPatches = createDevvitStatePatches(
+          previousJsonState,
           devvitStateJsonValueSchema.parse(nextState),
         );
+
+        return { patches: computedPatches, nextState };
       },
     });
   };
@@ -327,38 +314,40 @@ export const createDevvitState = <State>({
   };
 };
 
+type DevvitStateMutationResult<State> = {
+  patches: readonly DevvitStatePatch[];
+  nextState: State;
+};
+
 const commitMutation = async <State>({
   key,
   channel,
   redis,
   realtime,
   storageKeys,
-  stateSchema,
   snapshotSchema,
   maxUpdates,
   now,
-  getPatches,
+  produceMutation,
 }: {
   key: string;
   channel: string;
   redis: DevvitStateRedis;
   realtime: DevvitStateRealtime;
   storageKeys: DevvitStateStorageKeys;
-  stateSchema: ZodType<State>;
   snapshotSchema: ZodType<DevvitStateSnapshot<State>>;
   maxUpdates: number;
   now: () => number;
-  getPatches: (
+  // The producer is evaluated after WATCH so transaction conflicts rerun the
+  // mutation against the newest committed snapshot.
+  produceMutation: (
     snapshot: DevvitStateSnapshot<State>,
-  ) => readonly DevvitStatePatch[];
+  ) => DevvitStateMutationResult<State>;
 }): Promise<DevvitStateUpdate | null> => {
-  for (let attempt = 0; attempt < maxCommitAttempts; attempt += 1) {
-    // The producer is evaluated after WATCH so transaction conflicts rerun the
-    // mutation against the newest committed snapshot.
-    const transaction = await redis.watch(storageKeys.version);
-    let shouldDiscard = true;
-
-    try {
+  return commitWithRetry(
+    redis,
+    [storageKeys.version],
+    async (transaction) => {
       const snapshot = await readStoredSnapshot({
         redis,
         snapshotKey: storageKeys.snapshot,
@@ -378,20 +367,13 @@ const commitMutation = async <State>({
         throw new Error(`State ${key} has inconsistent Redis version records.`);
       }
 
-      const patches = getPatches(snapshot).map(cloneDevvitStatePatch);
+      const { patches: rawPatches, nextState } = produceMutation(snapshot);
 
-      if (patches.length === 0) {
-        await discardTransaction(transaction);
-        shouldDiscard = false;
+      if (rawPatches.length === 0) {
         return null;
       }
 
-      const nextState = stateSchema.parse(
-        applyDevvitStatePatches(
-          devvitStateJsonValueSchema.parse(snapshot.state),
-          patches,
-        ),
-      );
+      const patches = rawPatches.map(cloneDevvitStatePatch);
       const nextVersion = currentVersion + 1;
       const updatedAtMs = now();
       const nextSnapshot: DevvitStateSnapshot<State> = {
@@ -421,7 +403,6 @@ const commitMutation = async <State>({
       );
 
       const results = await transaction.exec();
-      shouldDiscard = false;
 
       if (results[0] === nextVersion) {
         // Realtime is a fast path only. If broadcast fails, clients can still
@@ -429,16 +410,38 @@ const commitMutation = async <State>({
         await broadcastUpdate(realtime, channel, update);
         return update;
       }
-    } catch (error) {
-      if (shouldDiscard) {
-        await discardTransaction(transaction);
-      }
 
-      throw error;
+      return RETRY;
+    },
+    `Failed to commit state ${key}.`,
+  );
+};
+
+const RETRY: unique symbol = Symbol("devvit-state.retry");
+type RetrySignal = typeof RETRY;
+
+const commitWithRetry = async <T>(
+  redis: DevvitStateRedis,
+  watchKeys: readonly string[],
+  attempt: (transaction: DevvitStateRedisTransaction) => Promise<T | RetrySignal>,
+  exhaustedMessage: string,
+): Promise<T> => {
+  for (let i = 0; i < maxCommitAttempts; i += 1) {
+    const transaction = await redis.watch(...watchKeys);
+
+    try {
+      const outcome = await attempt(transaction);
+
+      if (outcome !== RETRY) {
+        return outcome;
+      }
+    } finally {
+      // Idempotent: a no-op if exec() already closed the transaction.
+      await discardTransaction(transaction);
     }
   }
 
-  throw new Error(`Failed to commit state ${key}.`);
+  throw new Error(exhaustedMessage);
 };
 
 const cloneDevvitStatePatch = (patch: DevvitStatePatch): DevvitStatePatch => {
