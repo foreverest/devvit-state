@@ -353,7 +353,6 @@ const commitMutation = async <State>({
       };
       const update: DevvitStateUpdate = {
         stateKey: key,
-        updateId: `${key}:${nextVersion}`,
         version: nextVersion,
         patches,
         createdAtMs: updatedAtMs,

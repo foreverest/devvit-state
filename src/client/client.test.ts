@@ -214,7 +214,6 @@ const snapshot = (
 const addNumberUpdate = (version: number, value: number): DevvitStateUpdate => {
   return {
     stateKey,
-    updateId: `${stateKey}:${version}`,
     version,
     patches: [
       {

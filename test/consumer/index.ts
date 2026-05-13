@@ -35,7 +35,6 @@ const clientState = createDevvitStateClient({
 });
 const update: DevvitStateUpdate = {
   stateKey: key,
-  updateId: `${key}:1`,
   version: 1,
   patches: [
     {

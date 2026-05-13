@@ -110,7 +110,6 @@ describe("Devvit state server", () => {
       });
       expect(update).toMatchObject({
         stateKey: "server:commit",
-        updateId: "server:commit:1",
         version: 1,
         patches: [
           {

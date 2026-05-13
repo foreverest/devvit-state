@@ -42,7 +42,6 @@ export const devvitStatePatchSchema = z.discriminatedUnion("op", [
  */
 export const devvitStateUpdateSchema = z.object({
   stateKey: z.string(),
-  updateId: z.string(),
   version: z.number().int().nonnegative(),
   patches: z.array(devvitStatePatchSchema),
   createdAtMs: z.number().finite(),
