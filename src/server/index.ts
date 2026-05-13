@@ -4,7 +4,6 @@ import {
 } from "@devvit/web/server";
 import type { ZodType } from "zod";
 import {
-  applyDevvitStatePatches,
   asDevvitStateJsonValue,
   cloneDevvitStateJson,
   createDevvitStatePatches,
@@ -68,7 +67,7 @@ type DevvitStateStorageKeys = {
 export type CreateDevvitStateOptions<State> = {
   /** Unique application-level key for this state instance. */
   key: string;
-  /** Zod schema used to validate snapshots, mutations, and patch results. */
+  /** Zod schema used to validate snapshots and mutation results. */
   schema: ZodType<State>;
   /** Initial value used when no snapshot exists yet. */
   defaultValue?: () => State;
@@ -117,10 +116,6 @@ export type DevvitState<State> = {
   /** Atomically mutates state with an ergonomic producer callback. */
   mutate(
     producer: DevvitStateMutationProducer<State>,
-  ): Promise<DevvitStateUpdate | null>;
-  /** Atomically applies explicit JSON Patch-style operations. */
-  patch(
-    patches: readonly DevvitStatePatch[],
   ): Promise<DevvitStateUpdate | null>;
 };
 
@@ -283,38 +278,11 @@ export const createDevvitState = async <State>({
     });
   };
 
-  const patch = async (
-    patches: readonly DevvitStatePatch[],
-  ): Promise<DevvitStateUpdate | null> => {
-    return commitMutation({
-      key,
-      redis,
-      realtime: realtimeClient,
-      storageKeys,
-      snapshotSchema,
-      maxUpdates,
-      now,
-      produceMutation: (snapshot) => {
-        const previousJsonState = asDevvitStateJsonValue(snapshot.state);
-        const nextState = stateSchema.parse(
-          applyDevvitStatePatches(previousJsonState, patches),
-        );
-        const computedPatches = createDevvitStatePatches(
-          previousJsonState,
-          asDevvitStateJsonValue(nextState),
-        );
-
-        return { patches: computedPatches, nextState };
-      },
-    });
-  };
-
   return {
     key,
     getCurrent,
     getUpdatesSince,
     mutate,
-    patch,
   };
 };
 

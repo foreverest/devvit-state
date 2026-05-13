@@ -129,30 +129,6 @@ describe("Devvit state server", () => {
     },
   );
 
-  devvitTest("commits low-level patches after schema validation", async () => {
-    const state = await createState("server:patch");
-
-    await state.patch([
-      {
-        op: "replace",
-        path: "/hello",
-        value: "patched",
-      },
-      {
-        op: "remove",
-        path: "/numbers/2",
-      },
-    ]);
-
-    await expect(state.getCurrent()).resolves.toMatchObject({
-      version: 1,
-      state: {
-        hello: "patched",
-        numbers: [1, 2],
-      },
-    });
-  });
-
   devvitTest(
     "retries aborted transactions with contiguous versions",
     async () => {

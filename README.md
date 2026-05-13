@@ -78,18 +78,6 @@ const missingUpdates = await roomState.getUpdatesSince({
 });
 ```
 
-For lower-level callers, `patch()` applies explicit JSON Pointer patches:
-
-```ts
-await roomState.patch([
-  {
-    op: "add",
-    path: "/users/-",
-    value: userId,
-  },
-]);
-```
-
 Mutation producers may run more than once after Redis transaction conflicts. Keep producers deterministic and free of external side effects.
 
 ## Client Usage
@@ -156,7 +144,6 @@ const state = await createDevvitState({
 await state.getCurrent();
 await state.getUpdatesSince({ sinceVersion, limit });
 await state.mutate((draft) => {});
-await state.patch([{ op: "replace", path: "/title", value: "New title" }]);
 ```
 
 Client:
@@ -188,6 +175,6 @@ createDevvitStatePatches(previousState, nextState);
 
 - State values must be JSON-compatible and accepted by the provided Zod schema.
 - `createDevvitState()` writes version `0` only when the state is missing.
-- `mutate()` and `patch()` return `null` when no state change is produced.
+- `mutate()` returns `null` when no state change is produced.
 - Realtime messages may be dropped, duplicated, delayed, or reordered; clients treat Realtime as a fast path and recover with `fetchUpdatesSince`.
 - If the bounded update log no longer contains the missing update, the client fetches a fresh snapshot and calls `onResync`.
