@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { redis } from "@devvit/web/server";
 import { createDevvitTest } from "@devvit/test/server/vitest";
 import { z } from "zod";
-import { createDevvitState, getDevvitStateRealtimeChannel } from "./index";
+import { getDevvitStateRealtimeChannel } from "../shared/channel.js";
+import { createDevvitState } from "./index";
 
 const devvitTest = createDevvitTest({
   subredditName: "devvit_state_test",
@@ -121,8 +122,10 @@ describe("Devvit state server", () => {
         ],
         createdAtMs: 123_000,
       });
+      const channel = getDevvitStateRealtimeChannel("server:commit");
+
       expect(
-        mocks.realtime.getSentMessagesForChannel(state.channel)[0]?.data?.msg,
+        mocks.realtime.getSentMessagesForChannel(channel)[0]?.data?.msg,
       ).toEqual(update);
     },
   );

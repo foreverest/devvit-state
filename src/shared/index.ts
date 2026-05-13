@@ -1,4 +1,3 @@
-export { getDevvitStateRealtimeChannel } from "./channel.js";
 export {
   applyDevvitStatePatches,
   cloneDevvitStateJson,

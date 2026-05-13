@@ -3,7 +3,6 @@ import { createDevvitState } from "devvit-state/server";
 import { createDevvitStateClient } from "devvit-state/client";
 import {
   applyDevvitStatePatches,
-  getDevvitStateRealtimeChannel,
   type DevvitStateUpdate,
 } from "devvit-state/shared";
 
@@ -11,7 +10,6 @@ const schema = z.object({
   count: z.number(),
 });
 const key = "consumer:test";
-const channel = getDevvitStateRealtimeChannel(key);
 const serverState = createDevvitState({
   key,
   schema,
@@ -22,7 +20,6 @@ const serverState = createDevvitState({
 const clientState = createDevvitStateClient({
   key,
   schema,
-  channel,
   fetchSnapshot: async () => ({
     version: 0,
     state: {

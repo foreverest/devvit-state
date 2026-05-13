@@ -1,4 +1,7 @@
-import { realtime, redis as defaultRedis } from "@devvit/web/server";
+import {
+  realtime as defaultRealtime,
+  redis as defaultRedis,
+} from "@devvit/web/server";
 import type { ZodType } from "zod";
 import {
   applyDevvitStatePatches,
@@ -8,14 +11,12 @@ import {
   createDevvitStateSnapshotSchema,
   createDevvitStateValueSchema,
   devvitStateUpdateSchema,
-  getDevvitStateRealtimeChannel,
   type DevvitStateUpdate,
   type DevvitStateUpdatesSinceResult,
   type DevvitStatePatch,
   type DevvitStateSnapshot,
 } from "../shared/index.js";
-
-export { getDevvitStateRealtimeChannel } from "../shared/index.js";
+import { getDevvitStateRealtimeChannel } from "../shared/channel.js";
 
 type RedisSortedSetMember = {
   member: string;
@@ -52,7 +53,7 @@ type DevvitStateRedisTransaction = {
 };
 
 type DevvitStateRealtime = {
-  send(channel: string, update: DevvitStateUpdate): Promise<void>;
+  send(update: DevvitStateUpdate): Promise<void>;
 };
 
 type DevvitStateStorageKeys = {
@@ -71,8 +72,6 @@ export type CreateDevvitStateOptions<State> = {
   schema: ZodType<State>;
   /** Initial value used by `initialize()` when no snapshot exists yet. */
   defaultValue?: () => State;
-  /** Realtime channel used for committed updates. Defaults from the state key. */
-  channel?: string;
   /** Maximum number of recent updates kept for client replay. */
   maxUpdates?: number;
   /** Maximum number of updates returned by one replay query. */
@@ -109,8 +108,6 @@ export type DevvitStateMutationProducer<State> = (draft: State) => void;
 export type DevvitState<State> = {
   /** Unique application-level key for this state instance. */
   readonly key: string;
-  /** Realtime channel where committed updates are broadcast. */
-  readonly channel: string;
   /** Creates version 0 if no snapshot exists, otherwise returns the existing snapshot. */
   initialize(): Promise<DevvitStateSnapshot<State>>;
   /** Reads the current authoritative snapshot, or `null` if uninitialized. */
@@ -140,12 +137,11 @@ export const createDevvitState = <State>({
   key,
   schema,
   defaultValue,
-  channel = getDevvitStateRealtimeChannel(key),
   maxUpdates = defaultMaxUpdates,
   maxUpdateFetchLimit = defaultMaxUpdateFetchLimit,
   now = Date.now,
   redis = defaultRedis,
-  realtime: realtimeClient = realtime,
+  realtime: customRealtime,
 }: CreateDevvitStateOptions<State>): DevvitState<State> => {
   if (!Number.isSafeInteger(maxUpdates) || maxUpdates < 1) {
     throw new Error("maxUpdates must be a positive safe integer.");
@@ -156,6 +152,14 @@ export const createDevvitState = <State>({
   }
 
   const storageKeys = getDevvitStateStorageKeys(key);
+  const channel = getDevvitStateRealtimeChannel(key);
+  const realtimeClient =
+    customRealtime ??
+    ({
+      send: async (update: DevvitStateUpdate) => {
+        await defaultRealtime.send(channel, update);
+      },
+    } satisfies DevvitStateRealtime);
   const stateSchema = createDevvitStateValueSchema(schema);
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
 
@@ -251,7 +255,6 @@ export const createDevvitState = <State>({
   ): Promise<DevvitStateUpdate | null> => {
     return commitMutation({
       key,
-      channel,
       redis,
       realtime: realtimeClient,
       storageKeys,
@@ -279,7 +282,6 @@ export const createDevvitState = <State>({
   ): Promise<DevvitStateUpdate | null> => {
     return commitMutation({
       key,
-      channel,
       redis,
       realtime: realtimeClient,
       storageKeys,
@@ -303,7 +305,6 @@ export const createDevvitState = <State>({
 
   return {
     key,
-    channel,
     initialize,
     getCurrent,
     getUpdatesSince,
@@ -319,7 +320,6 @@ type DevvitStateMutationResult<State> = {
 
 const commitMutation = async <State>({
   key,
-  channel,
   redis,
   realtime,
   storageKeys,
@@ -329,7 +329,6 @@ const commitMutation = async <State>({
   produceMutation,
 }: {
   key: string;
-  channel: string;
   redis: DevvitStateRedis;
   realtime: DevvitStateRealtime;
   storageKeys: DevvitStateStorageKeys;
@@ -405,7 +404,7 @@ const commitMutation = async <State>({
       if (results[0] === nextVersion) {
         // Realtime is a fast path only. If broadcast fails, clients can still
         // recover from the committed update log.
-        await broadcastUpdate(realtime, channel, update);
+        await broadcastUpdate(realtime, update);
         return update;
       }
 
@@ -421,7 +420,9 @@ type RetrySignal = typeof RETRY;
 const commitWithRetry = async <T>(
   redis: DevvitStateRedis,
   watchKeys: readonly string[],
-  attempt: (transaction: DevvitStateRedisTransaction) => Promise<T | RetrySignal>,
+  attempt: (
+    transaction: DevvitStateRedisTransaction,
+  ) => Promise<T | RetrySignal>,
   exhaustedMessage: string,
 ): Promise<T> => {
   for (let i = 0; i < maxCommitAttempts; i += 1) {
@@ -459,11 +460,10 @@ const cloneDevvitStatePatch = (patch: DevvitStatePatch): DevvitStatePatch => {
 
 const broadcastUpdate = async (
   realtimeClient: DevvitStateRealtime,
-  channel: string,
   update: DevvitStateUpdate,
 ): Promise<void> => {
   try {
-    await realtimeClient.send(channel, update);
+    await realtimeClient.send(update);
   } catch (error) {
     console.error("Failed to broadcast Devvit state update:", error);
   }

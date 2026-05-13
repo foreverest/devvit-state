@@ -100,7 +100,6 @@ The client API connects to Realtime, fetches a baseline snapshot, replays missin
 
 ```ts
 import { createDevvitStateClient } from "devvit-state/client";
-import { getDevvitStateRealtimeChannel } from "devvit-state/shared";
 import { z } from "zod";
 
 const roomStateSchema = z.object({
@@ -113,7 +112,6 @@ const key = `room:${postId}`;
 const clientState = createDevvitStateClient({
   key,
   schema: roomStateSchema,
-  channel: getDevvitStateRealtimeChannel(key),
   fetchSnapshot: async () => await trpc.roomState.current.query(),
   fetchUpdatesSince: async (input) =>
     await trpc.roomState.updatesSince.query(input),
@@ -170,7 +168,6 @@ Client:
 const client = createDevvitStateClient({
   key,
   schema,
-  channel,
   fetchSnapshot,
   fetchUpdatesSince,
 });
@@ -186,7 +183,6 @@ const subscription = await client.subscribe({
 Shared:
 
 ```ts
-getDevvitStateRealtimeChannel(key);
 applyDevvitStatePatches(state, update.patches);
 createDevvitStatePatches(previousState, nextState);
 ```

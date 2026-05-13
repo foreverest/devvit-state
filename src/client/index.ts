@@ -11,8 +11,7 @@ import {
   type DevvitStateUpdatesSinceResult,
   type DevvitStateSnapshot,
 } from "../shared/index.js";
-
-export { getDevvitStateRealtimeChannel } from "../shared/index.js";
+import { getDevvitStateRealtimeChannel } from "../shared/channel.js";
 
 /**
  * Options for creating a client-side Devvit state subscriber.
@@ -22,8 +21,6 @@ export type CreateDevvitStateClientOptions<State> = {
   key: string;
   /** Zod schema used to validate snapshots and applied updates. */
   schema: ZodType<State>;
-  /** Realtime channel where server updates are broadcast. */
-  channel: string;
   /** Fetches the baseline snapshot through app-owned transport. */
   fetchSnapshot: () => Promise<DevvitStateSnapshot<State>>;
   /** Fetches committed updates after a known version through app-owned transport. */
@@ -112,7 +109,6 @@ const defaultMaxUpdateFetchLimit = 500;
 export const createDevvitStateClient = <State>({
   key,
   schema,
-  channel,
   fetchSnapshot,
   fetchUpdatesSince,
   maxUpdateFetchLimit = defaultMaxUpdateFetchLimit,
@@ -123,6 +119,7 @@ export const createDevvitStateClient = <State>({
 
   const stateSchema = createDevvitStateValueSchema(schema);
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
+  const channel = getDevvitStateRealtimeChannel(key);
 
   const subscribe = async (
     callbacks: DevvitStateClientSubscribeOptions<State> = {},

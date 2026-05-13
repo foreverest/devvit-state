@@ -38,7 +38,7 @@ vi.mock("@devvit/web/client", () => ({
 }));
 
 const stateKey = "client:test-state";
-const channel = "client-test-channel";
+const expectedChannel = "devvit_state_client_3atest_2dstate";
 const testStateSchema = z.object({
   label: z.string(),
   numbers: z.array(z.number()),
@@ -58,7 +58,6 @@ describe("Devvit state client", () => {
     const client = createDevvitStateClient({
       key: stateKey,
       schema: testStateSchema,
-      channel,
       fetchSnapshot: async () => await snapshotDeferred.promise,
       fetchUpdatesSince: async () => ({
         currentVersion: 1,
@@ -78,8 +77,11 @@ describe("Devvit state client", () => {
     const subscription = await subscriptionPromise;
 
     expect(updates).toEqual([1, 2]);
+    expect(realtimeMock.connections[0]?.channel).toBe(expectedChannel);
 
     subscription.unsubscribe();
+
+    expect(realtimeMock.disconnectedChannels).toEqual([expectedChannel]);
   });
 
   test("fetches missing updates on a realtime gap before applying buffered updates", async () => {
@@ -113,7 +115,6 @@ describe("Devvit state client", () => {
     const client = createDevvitStateClient({
       key: stateKey,
       schema: testStateSchema,
-      channel,
       fetchSnapshot: async () => snapshot(0, []),
       fetchUpdatesSince,
     });
@@ -138,7 +139,6 @@ describe("Devvit state client", () => {
     const client = createDevvitStateClient({
       key: stateKey,
       schema: testStateSchema,
-      channel,
       fetchSnapshot: async () => {
         const nextSnapshot = snapshots[snapshotIndex];
 
@@ -174,7 +174,6 @@ describe("Devvit state client", () => {
     const client = createDevvitStateClient({
       key: stateKey,
       schema: testStateSchema,
-      channel,
       fetchSnapshot: async () => snapshot(1, [1]),
       fetchUpdatesSince: async () => ({
         currentVersion: 1,
