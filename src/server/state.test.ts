@@ -34,9 +34,9 @@ describe("Devvit state server", () => {
   devvitTest(
     "initializes missing state and preserves existing state",
     async () => {
-      const state = createState("server:init");
+      const state = await createState("server:init");
 
-      await expect(state.initialize()).resolves.toEqual({
+      await expect(state.getCurrent()).resolves.toEqual({
         version: 0,
         state: {
           hello: "world",
@@ -49,7 +49,9 @@ describe("Devvit state server", () => {
         draft.numbers.push(42);
       });
 
-      await expect(state.initialize()).resolves.toEqual({
+      const existingState = await createState("server:init");
+
+      await expect(existingState.getCurrent()).resolves.toEqual({
         version: 1,
         state: {
           hello: "world",
@@ -63,15 +65,14 @@ describe("Devvit state server", () => {
   devvitTest(
     "rejects invalid default values and invalid next states",
     async () => {
-      const invalidDefaultState = createDevvitState({
-        key: "server:invalid-default",
-        schema: testStateSchema,
-      });
-      const state = createState("server:invalid-mutation");
+      await expect(
+        createDevvitState({
+          key: "server:invalid-default",
+          schema: testStateSchema,
+        }),
+      ).rejects.toThrow();
 
-      await expect(invalidDefaultState.initialize()).rejects.toThrow();
-
-      await state.initialize();
+      const state = await createState("server:invalid-mutation");
 
       await expect(
         state.mutate((draft) => {
@@ -84,9 +85,7 @@ describe("Devvit state server", () => {
   devvitTest(
     "commits snapshot, version, update log, and broadcast",
     async ({ mocks }) => {
-      const state = createState("server:commit");
-
-      await state.initialize();
+      const state = await createState("server:commit");
 
       const update = await state.mutate((draft) => {
         draft.numbers.push(42);
@@ -131,9 +130,8 @@ describe("Devvit state server", () => {
   );
 
   devvitTest("commits low-level patches after schema validation", async () => {
-    const state = createState("server:patch");
+    const state = await createState("server:patch");
 
-    await state.initialize();
     await state.patch([
       {
         op: "replace",
@@ -158,11 +156,9 @@ describe("Devvit state server", () => {
   devvitTest(
     "retries aborted transactions with contiguous versions",
     async () => {
-      const state = createState("server:retry");
+      const state = await createState("server:retry");
       const originalWatch = redis.watch.bind(redis);
       let execCount = 0;
-
-      await state.initialize();
 
       vi.spyOn(redis, "watch").mockImplementation(async (...keys) => {
         const transaction = await originalWatch(...keys);
@@ -195,9 +191,8 @@ describe("Devvit state server", () => {
   );
 
   devvitTest("reads bounded updates in sorted order with hasMore", async () => {
-    const state = createState("server:updates");
+    const state = await createState("server:updates");
 
-    await state.initialize();
     await state.mutate((draft) => {
       draft.numbers.push(4);
     });

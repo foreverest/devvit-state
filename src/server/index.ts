@@ -70,7 +70,7 @@ export type CreateDevvitStateOptions<State> = {
   key: string;
   /** Zod schema used to validate snapshots, mutations, and patch results. */
   schema: ZodType<State>;
-  /** Initial value used by `initialize()` when no snapshot exists yet. */
+  /** Initial value used when no snapshot exists yet. */
   defaultValue?: () => State;
   /** Maximum number of recent updates kept for client replay. */
   maxUpdates?: number;
@@ -108,10 +108,8 @@ export type DevvitStateMutationProducer<State> = (draft: State) => void;
 export type DevvitState<State> = {
   /** Unique application-level key for this state instance. */
   readonly key: string;
-  /** Creates version 0 if no snapshot exists, otherwise returns the existing snapshot. */
-  initialize(): Promise<DevvitStateSnapshot<State>>;
-  /** Reads the current authoritative snapshot, or `null` if uninitialized. */
-  getCurrent(): Promise<DevvitStateSnapshot<State> | null>;
+  /** Reads the current authoritative snapshot. */
+  getCurrent(): Promise<DevvitStateSnapshot<State>>;
   /** Reads bounded recent updates after `sinceVersion` for client replay. */
   getUpdatesSince(
     input: DevvitStateUpdatesSinceInput,
@@ -131,9 +129,9 @@ const defaultMaxUpdateFetchLimit = 500;
 const maxCommitAttempts = 5;
 
 /**
- * Creates a server-side manager for Zod-typed atomic Devvit state.
+ * Creates an initialized server-side manager for Zod-typed atomic Devvit state.
  */
-export const createDevvitState = <State>({
+export const createDevvitState = async <State>({
   key,
   schema,
   defaultValue,
@@ -142,7 +140,7 @@ export const createDevvitState = <State>({
   now = Date.now,
   redis = defaultRedis,
   realtime: customRealtime,
-}: CreateDevvitStateOptions<State>): DevvitState<State> => {
+}: CreateDevvitStateOptions<State>): Promise<DevvitState<State>> => {
   if (!Number.isSafeInteger(maxUpdates) || maxUpdates < 1) {
     throw new Error("maxUpdates must be a positive safe integer.");
   }
@@ -163,7 +161,7 @@ export const createDevvitState = <State>({
   const stateSchema = createDevvitStateValueSchema(schema);
   const snapshotSchema = createDevvitStateSnapshotSchema(schema);
 
-  const initialize = async (): Promise<DevvitStateSnapshot<State>> => {
+  const initializeState = async (): Promise<DevvitStateSnapshot<State>> => {
     return commitWithRetry(
       redis,
       // Watch the snapshot key so two first-time initializers do not both
@@ -201,12 +199,20 @@ export const createDevvitState = <State>({
     );
   };
 
-  const getCurrent = async (): Promise<DevvitStateSnapshot<State> | null> => {
-    return readStoredSnapshot({
+  await initializeState();
+
+  const getCurrent = async (): Promise<DevvitStateSnapshot<State>> => {
+    const snapshot = await readStoredSnapshot({
       redis,
       snapshotKey: storageKeys.snapshot,
       snapshotSchema,
     });
+
+    if (!snapshot) {
+      throw new Error(`State ${key} snapshot is missing.`);
+    }
+
+    return snapshot;
   };
 
   const getUpdatesSince = async ({
@@ -305,7 +311,6 @@ export const createDevvitState = <State>({
 
   return {
     key,
-    initialize,
     getCurrent,
     getUpdatesSince,
     mutate,
@@ -352,7 +357,7 @@ const commitMutation = async <State>({
       });
 
       if (!snapshot) {
-        throw new Error(`State ${key} is not initialized.`);
+        throw new Error(`State ${key} snapshot is missing.`);
       }
 
       const currentVersion = await readCurrentVersion(

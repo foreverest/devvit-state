@@ -10,7 +10,7 @@ const schema = z.object({
   count: z.number(),
 });
 const key = "consumer:test";
-const serverState = createDevvitState({
+const serverState = await createDevvitState({
   key,
   schema,
   defaultValue: () => ({

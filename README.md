@@ -58,7 +58,7 @@ const roomStateSchema = z.object({
   users: z.array(z.string()),
 });
 
-const roomState = createDevvitState({
+const roomState = await createDevvitState({
   key: `room:${postId}`,
   schema: roomStateSchema,
   defaultValue: () => ({
@@ -67,8 +67,6 @@ const roomState = createDevvitState({
   }),
 });
 
-await roomState.initialize();
-
 const current = await roomState.getCurrent();
 
 const update = await roomState.mutate((draft) => {
@@ -76,7 +74,7 @@ const update = await roomState.mutate((draft) => {
 });
 
 const missingUpdates = await roomState.getUpdatesSince({
-  sinceVersion: current?.version ?? 0,
+  sinceVersion: current.version,
 });
 ```
 
@@ -147,7 +145,7 @@ The transport is app-owned. Wire `getCurrent()` and `getUpdatesSince()` through 
 Server:
 
 ```ts
-const state = createDevvitState({
+const state = await createDevvitState({
   key,
   schema,
   defaultValue,
@@ -155,7 +153,6 @@ const state = createDevvitState({
   maxUpdateFetchLimit: 500,
 });
 
-await state.initialize();
 await state.getCurrent();
 await state.getUpdatesSince({ sinceVersion, limit });
 await state.mutate((draft) => {});
@@ -190,7 +187,7 @@ createDevvitStatePatches(previousState, nextState);
 ## Notes
 
 - State values must be JSON-compatible and accepted by the provided Zod schema.
-- `initialize()` writes version `0` only when the state is missing.
+- `createDevvitState()` writes version `0` only when the state is missing.
 - `mutate()` and `patch()` return `null` when no state change is produced.
 - Realtime messages may be dropped, duplicated, delayed, or reordered; clients treat Realtime as a fast path and recover with `fetchUpdatesSince`.
 - If the bounded update log no longer contains the missing update, the client fetches a fresh snapshot and calls `onResync`.

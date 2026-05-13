@@ -30,7 +30,7 @@ For state key `K`, three Redis keys are used: `devvit-state:K:version` (counter)
 
 The client is responsible for delivering only contiguous updates to app code:
 
-- It connects Realtime *before* fetching the snapshot, so any in-flight updates are buffered.
+- It connects Realtime _before_ fetching the snapshot, so any in-flight updates are buffered.
 - `pendingUpdatesByVersion` is the buffer; `knownCurrentVersion` tracks the highest version seen via either Realtime or replay.
 - If a Realtime message arrives with a gap, `recoverGap` calls `fetchUpdatesSince`. If even that comes back empty for the missing version, the client falls back to a fresh `fetchSnapshot` and emits `onResync` instead of `onUpdate`.
 - Realtime is treated as a fast path that may drop, duplicate, delay, or reorder. Correctness is provided by the version chain + replay, not by Realtime.
@@ -52,4 +52,4 @@ The server config sets `exactOptionalPropertyTypes: false` (the others leave the
 
 - Server tests use `createDevvitTest` from `@devvit/test/server/vitest`, which spins up a Devvit-style Redis + Realtime environment per test. `devvitTest(...)` is the per-test wrapper — use it instead of plain `test(...)` for any test that touches Redis or Realtime.
 - Tests inject deterministic `now: () => 123_000` and rely on the real Devvit Redis from the test harness, not mocks.
-- `test/consumer/` is a *type-only* smoke test that imports the package by its public name to verify the `exports` map and `.d.ts` outputs — it does not run any code.
+- `test/consumer/` is a _type-only_ smoke test that imports the package by its public name to verify the `exports` map and `.d.ts` outputs — it does not run any code.
