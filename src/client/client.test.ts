@@ -54,6 +54,7 @@ beforeEach(() => {
 describe("Devvit state client", () => {
   test("buffers realtime updates during startup and delivers contiguous updates", async () => {
     const snapshotDeferred = createDeferred<DevvitStateSnapshot<TestState>>();
+    const snapshotVersions: number[] = [];
     const updates: number[] = [];
     const client = createDevvitStateClient({
       key: stateKey,
@@ -66,6 +67,9 @@ describe("Devvit state client", () => {
       }),
     });
     const subscriptionPromise = client.subscribe({
+      onSnapshot: ({ snapshot: nextSnapshot }) => {
+        snapshotVersions.push(nextSnapshot.version);
+      },
       onUpdate: ({ update }) => {
         updates.push(update.version);
       },
@@ -76,6 +80,7 @@ describe("Devvit state client", () => {
 
     const subscription = await subscriptionPromise;
 
+    expect(snapshotVersions).toEqual([0]);
     expect(updates).toEqual([1, 2]);
     expect(realtimeMock.connections[0]?.channel).toBe(expectedChannel);
 
@@ -133,7 +138,7 @@ describe("Devvit state client", () => {
   });
 
   test("falls back to snapshot resync when missing updates are unavailable", async () => {
-    const resyncVersions: number[] = [];
+    const snapshotVersions: number[] = [];
     const snapshots = [snapshot(2, [1, 2]), snapshot(5, [1, 2, 3, 4, 5])];
     let snapshotIndex = 0;
     const client = createDevvitStateClient({
@@ -156,15 +161,15 @@ describe("Devvit state client", () => {
       }),
     });
     const subscription = await client.subscribe({
-      onResync: ({ snapshot: nextSnapshot }) => {
-        resyncVersions.push(nextSnapshot.version);
+      onSnapshot: ({ snapshot: nextSnapshot }) => {
+        snapshotVersions.push(nextSnapshot.version);
       },
     });
 
     emitRealtime(addNumberUpdate(5, 5));
-    await waitFor(() => resyncVersions.length === 1);
+    await waitFor(() => snapshotVersions.length === 2);
 
-    expect(resyncVersions).toEqual([5]);
+    expect(snapshotVersions).toEqual([2, 5]);
 
     subscription.unsubscribe();
   });

@@ -104,7 +104,7 @@ const clientState = createDevvitStateClient({
 });
 
 const subscription = await clientState.subscribe({
-  onReady({ snapshot }) {
+  onSnapshot({ snapshot }) {
     render(snapshot.state);
   },
   onUpdate({ update, state, previousState }) {
@@ -113,10 +113,6 @@ const subscription = await clientState.subscribe({
     }
 
     render(state, previousState);
-  },
-  onResync({ snapshot }) {
-    console.warn("State resynced");
-    render(snapshot.state);
   },
   onError(error) {
     console.error("State sync failed:", error);
@@ -157,9 +153,8 @@ const client = createDevvitStateClient({
 });
 
 const subscription = await client.subscribe({
-  onReady,
+  onSnapshot,
   onUpdate,
-  onResync,
   onError,
 });
 ```
@@ -177,4 +172,4 @@ createDevvitStatePatches(previousState, nextState);
 - `createDevvitState()` writes version `0` only when the state is missing.
 - `mutate()` returns `null` when no state change is produced.
 - Realtime messages may be dropped, duplicated, delayed, or reordered; clients treat Realtime as a fast path and recover with `fetchUpdatesSince`.
-- If the bounded update log no longer contains the missing update, the client fetches a fresh snapshot and calls `onResync`.
+- If the bounded update log no longer contains the missing update, the client fetches a fresh snapshot and calls `onSnapshot`.

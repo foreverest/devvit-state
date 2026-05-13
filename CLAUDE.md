@@ -32,7 +32,7 @@ The client is responsible for delivering only contiguous updates to app code:
 
 - It connects Realtime _before_ fetching the snapshot, so any in-flight updates are buffered.
 - `pendingUpdatesByVersion` is the buffer; `knownCurrentVersion` tracks the highest version seen via either Realtime or replay.
-- If a Realtime message arrives with a gap, `recoverGap` calls `fetchUpdatesSince`. If even that comes back empty for the missing version, the client falls back to a fresh `fetchSnapshot` and emits `onResync` instead of `onUpdate`.
+- If a Realtime message arrives with a gap, `recoverGap` calls `fetchUpdatesSince`. If even that comes back empty for the missing version, the client falls back to a fresh `fetchSnapshot` and emits `onSnapshot` instead of `onUpdate`.
 - Realtime is treated as a fast path that may drop, duplicate, delay, or reorder. Correctness is provided by the version chain + replay, not by Realtime.
 
 ### Schema validation boundary

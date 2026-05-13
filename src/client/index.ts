@@ -42,10 +42,10 @@ export type DevvitStateClientUpdatesSinceInput = {
 };
 
 /**
- * Payload delivered when the client has loaded its baseline snapshot.
+ * Payload delivered whenever the client loads a full snapshot.
  */
-export type DevvitStateClientReadyInput<State> = {
-  /** Baseline snapshot used before incremental updates are delivered. */
+export type DevvitStateClientSnapshotInput<State> = {
+  /** Snapshot used as the client's local state. */
   snapshot: DevvitStateSnapshot<State>;
 };
 
@@ -62,23 +62,13 @@ export type DevvitStateClientUpdateInput<State> = {
 };
 
 /**
- * Payload delivered when the client cannot replay missing updates and reloads a snapshot.
- */
-export type DevvitStateClientResyncInput<State> = {
-  /** Fresh snapshot that replaced the client's local state. */
-  snapshot: DevvitStateSnapshot<State>;
-};
-
-/**
  * Callback set for a Devvit state subscription.
  */
 export type DevvitStateClientSubscribeOptions<State> = {
-  /** Called once after the baseline snapshot is loaded. */
-  onReady?: (input: DevvitStateClientReadyInput<State>) => void;
+  /** Called after the baseline snapshot is loaded and after full snapshot reloads. */
+  onSnapshot?: (input: DevvitStateClientSnapshotInput<State>) => void;
   /** Called for each contiguous update applied to local state. */
   onUpdate?: (input: DevvitStateClientUpdateInput<State>) => void;
-  /** Called when the client reloads a full snapshot after replay is unavailable. */
-  onResync?: (input: DevvitStateClientResyncInput<State>) => void;
   /** Called when snapshot, replay, Realtime, or patch validation fails. */
   onError?: (error: unknown) => void;
 };
@@ -180,13 +170,13 @@ export const createDevvitStateClient = <State>({
     };
 
     const loadSnapshot = async (
-      shouldNotifyResync: boolean,
+      shouldResetPendingUpdates: boolean,
     ): Promise<DevvitStateSnapshot<State>> => {
       const snapshot = snapshotSchema.parse(await fetchSnapshot());
 
       currentSnapshot = snapshot;
 
-      if (shouldNotifyResync) {
+      if (shouldResetPendingUpdates) {
         // After a full resync, pending updates may belong to the abandoned
         // version chain. Drop them and let future Realtime/replay rebuild order.
         pendingUpdatesByVersion.clear();
@@ -201,11 +191,7 @@ export const createDevvitStateClient = <State>({
         }
       }
 
-      if (shouldNotifyResync) {
-        callbacks.onResync?.({ snapshot });
-      } else {
-        callbacks.onReady?.({ snapshot });
-      }
+      callbacks.onSnapshot?.({ snapshot });
 
       return snapshot;
     };
